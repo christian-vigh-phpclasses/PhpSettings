@@ -1,0 +1,274 @@
+<?php
+	/****************************************************************************************************
+	
+		This script takes an input file (settings.something.txt) containing the documentation of PHP 
+		settings and generates an output CSV file (settings.something.csv) that will later be read by
+		the PhpSettings class.
+		
+		The .txt file is just a cut&paste of the contents of the following url :
+		
+			http://php.net/manual/en/ini.list.php
+		
+		(the text not related to settings must be of course removed).
+		
+		The script tries to guess what are the applicable Php versions ; it also tries to do that
+		with Php modules, when the setting applies to a module.
+		
+		The CSV file contains the following columns :
+		- Setting name
+		- Value type. One the VALUE_TYPE_* constants defined in PhpSettings.phpclass
+		- Default value
+		- Location where the setting can be changed :
+		  . PHP_INI_USER :
+			Entry can be set in user scripts (like with ini_set()) or in the Windows registry. 
+			Since PHP 5.3, entry can be set in .user.ini  
+		  . PHP_INI_PERDIR :
+			Entry can be set in php.ini, .htaccess, httpd.conf or .user.ini (since PHP 5.3)  
+		  . PHP_INI_SYSTEM :
+			Entry can be set in php.ini or httpd.conf 
+		  . PHP_INI_ALL :
+			Entry can be set anywhere 
+		- Comment : additional description about the setting.
+		- Min Php version. Can be empty if the setting was created from the origins.
+		- Max Php version. Can be empty if the setting is still applicable
+		- Related module. Non empty if the setting applies to a PHP module.
+		- Min module version : the minimum related module version applicable (if any).
+		- Max module version : the maximum related module version applicable (if any).
+		
+		The values after the "Comment" column are extrapolated from the "Comment" contents themselves.
+	
+	 ****************************************************************************************************/
+	 
+	/*--------------------------------------------------------------------------------------------------
+	
+		Utility functions.
+		
+	 *--------------------------------------------------------------------------------------------------*/
+	function  error ( $msg )
+	   {
+		echo ( "***  error  *** $msg\n" ) ;
+		exit ( ) ;
+	    }
+	    
+	function  warning ( $msg )
+	   {
+		echo ( "*** warning *** $msg\n" ) ;
+	    }
+	    
+	    
+	// normalize_quoted_string -
+	//	Removes quotes from a quoted string, as well as escapes.
+	function  normalize_quoted_string ( $value )
+	   {
+		$length 	=  strlen ( $value ) ;
+		
+		if  ( isset ( $value [1] )  &&  $value [0]  ==  '"'  &&  substr ( $value, -1, 1 )  ==  '"' )
+			$value 	=  str_replace ( '\\"', '"', substr ( $value, 1, $length - 2 ) ) ;
+		
+		return ( $value ) ;
+	    }
+	    
+	    
+	// guess_value_type -
+	//	Tries to guess the type of the specified value.
+	function  guess_value_type ( $value )
+	   {
+		static 	$boolean_values 	=  [ 'on', 'true', 'yes', 'off', 'false', 'no', 'none' ] ;
+		
+		$low_value 		=  strtolower ( $value ) ;
+		$length 		=  strlen ( $value ) ;
+		
+		if  ( is_numeric ( $value ) )
+		   {
+			$v 	=  ( float ) $value ;
+			
+			if  ( ceil ( $v )  ==  $v )
+			   {
+				if  ( ! strncasecmp ( $value, '0x', 2 ) )
+					return ( 'VALUE_TYPE_HEXADECIMAL_INTEGER' ) ;
+				else if  ( $length  >  1  &&  $value [0]  ==  '0' )
+					return ( 'VALUE_TYPE_OCTAL_INTEGER' ) ;
+				else
+					return ( 'VALUE_TYPE_INTEGER' ) ;
+			    }
+			else
+				return ( 'VALUE_TYPE_FLOAT' ) ;
+		    }
+		else if  ( in_array ( $low_value, $boolean_values ) )
+			return ( 'VALUE_TYPE_BOOLEAN' ) ;
+		else if  ( preg_match ( '/^\d+%$/', $value ) )
+			return ( 'VALUE_TYPE_PERCENTAGE' ) ;
+		else if  ( preg_match ( '/^\d+[kmgt][b]?$/i', $value ) )
+			return ( 'VALUE_TYPE_QUANTITY' ) ;
+		else 
+			return ( 'VALUE_TYPE_STRING' ) ;
+	    }
+	    
+	    
+	// extract_applicable_versions -
+	//	Extracts applicable versions from the comment part of a setting.
+	function  extract_applicable_versions ( $setting, $comment )
+	   {
+		$data 		=  
+		   [
+			'php-min' 		=>  '',
+			'php-max' 		=>  '',
+			'module' 		=>  '',
+			'module-min' 		=>  '',
+			'module-max' 		=>  ''
+		    ] ;
+		    
+		if  ( ! $comment )
+			return ( $data ) ;
+		
+		$found_something 		=  false ;
+		
+		if  ( preg_match ( '/Removed \s+ in \s+ ( (?P<module> [^\s]+) \s+ )? (?P<version> \d+ ( \. \d+ (\. \d+)? )? )/ix', $comment, $match ) )
+		   {
+			$module 	=  ( isset ( $match [ 'module' ] ) ) ?  $match [ 'module' ] : '' ;
+			
+			if  ( ! $module )
+			   {
+				if  ( preg_match ( '/^(?P<module> .*?) \. /x', $setting, $setting_match ) )
+					$module 	=  $setting_match [ 'module' ] ;
+				else
+					$module 	=  'PHP' ;
+			    }
+			    
+			if  ( ! strcasecmp ( $match [ 'module' ], 'PHP' ) )
+				$data [ 'php-max' ]	=  $match [ 'version' ] ;
+			else
+			   {
+				$data [ 'module' ]	=  $match [ 'module' ] ;
+				$data [ 'module-max' ]	=  $match [ 'version' ] ;
+			    }
+
+			$found_something 	=  true ;
+		    }
+		    
+		if  ( preg_match ( '/( (Available \s+ since) | (Added \s+ in) ) \s+ ( (?P<module> [^\s]+) \s+ )? (?P<version> \d+ ( \. \d+ (\. \d+)? )? )/ix', $comment, $match ) )
+		   {
+			$module 	=  ( isset ( $match [ 'module' ] ) ) ?  $match [ 'module' ] : '' ;
+			
+			if  ( ! $module )
+			   {
+				if  ( preg_match ( '/^(?P<module> .*?) \. /x', $setting, $setting_match ) )
+					$module 	=  $setting_match [ 'module' ] ;
+				else
+					$module 	=  'PHP' ;
+			    }
+			
+			if  ( ! strcasecmp ( $match [ 'module' ], 'PHP' ) )
+				$data [ 'php-min' ]	=  $match [ 'version' ] ;
+			else
+			   {
+				$data [ 'module' ]	=  $match [ 'module' ] ;
+				$data [ 'module-min' ]	=  $match [ 'version' ] ;
+			    }
+
+			$found_something 	=  true ;
+		    }
+		
+		$data [ 'module' ] 	=  strtoupper ( $data [ 'module' ] ) ;
+		
+		return ( $data ) ;
+	    }
+	    
+	    
+	// get_location -
+	//	Gets a normalized setting location name.
+	function  get_location ( $setting, $location )
+	   {
+		$upper_location 	=  strtoupper ( $location ) ;
+		
+		switch ( $upper_location )
+		   {
+			case 	'PHP_INI_USER' :
+			case 	'PHP_INI_PERDIR' :
+			case 	'PHP_INI_SYSTEM' :
+			case 	'PHP_INI_ALL' :
+				return ( $upper_location ) ;
+				
+			case 	'PHP.INI' :
+				return ( 'PHP_INI_SYSTEM' ) ;
+				
+			default :
+				error ( "Invalid setting location \"$location\" for \"$setting\"." ) ;
+		    }
+	    }
+	    
+	    
+	/*--------------------------------------------------------------------------------------------------
+	
+		Main program.
+		
+	 *--------------------------------------------------------------------------------------------------*/
+
+	if  ( ! isset ( $argv [1] ) )
+	   {
+		echo ( "Usage : mapsettings input.txt [output.csv]\n" ) ;
+		exit ;
+	    }
+	    
+	$input_file 		=  $argv [1] ;
+	
+	if  ( ! file_exists ( $input_file ) ) 
+		error ( "File \"$input_file\" does not exist." ) ;
+	
+	if  ( isset ( $argv [2] ) )
+		$output_file 	=  $argv [2] ;
+	else
+	   {
+		$extension 	=  pathinfo ( $input_file, PATHINFO_EXTENSION ) ;
+		$output_file 	=  preg_replace ( "/\.$extension$/", '.csv', $input_file ) ;
+	    }
+	    
+	// Regex to match a line
+	$line_re 		=  '/^
+					(?P<setting> [^\s]+)
+					\s
+					(?P<default> 
+						( \s* " ( (\\\\") | ( [^"] ) )* ")
+						|
+						( [^\s]* )
+					 )
+					\s+
+					(?P<location> [^\s]+)
+					(
+						\s+
+						(?P<comment> .*)
+					 )?
+				    /ix' ;
+
+	// Create the output file
+	$output_fp 		=  fopen ( $output_file, "w" ) ;
+	fprintf ( $output_fp, "Setting;Value type;Default value;Location;Comment;Min PHP version;Max PHP version;Module;Min module version;Max module version\n" ) ;	
+	
+	// Scan the input lines
+	$lines 		=  file ( $input_file ) ;
+	
+	foreach  ( $lines  as  $line )
+	   {
+		$line 			=  trim ( $line ) ;
+		
+		if  ( ! $line )
+			continue ;
+		
+		preg_match ( $line_re, $line, $match ) ;
+		
+		$setting		=  $match [ 'setting' ] ;
+		$default_value 		=  normalize_quoted_string ( $match [ 'default' ] ) ;
+		$value_type 		=  guess_value_type ( $default_value ) ;
+		$location 		=  get_location ( $setting, $match [ 'location' ] ) ;
+		$comment 		=  ( isset ( $match [ 'comment' ] ) ) ?  $match [ 'comment' ] : '' ;
+		$escaped_comment	=  '"' . str_replace ( '"', '""', $comment ) . '"' ;
+		$data 			=  extract_applicable_versions ( $setting, $comment ) ;
+		
+		$output_line 		=  "$setting;$value_type;$default_value;$location;$escaped_comment;" .
+						"{$data [ 'php-min' ]};{$data [ 'php-max' ]};{$data [ 'module' ]};{$data [ 'module-min' ]};{$data [ 'module-max' ]}" ;
+
+		fwrite ( $output_fp, "$output_line\n" ) ;
+	    }
+	
+	// All done
+	fclose ( $output_fp ) ;
