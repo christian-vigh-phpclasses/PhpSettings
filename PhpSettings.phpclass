@@ -14,6 +14,10 @@
     [Version : 1.0]	[Date : 2016-11-05]     [Author : CV]
         Initial version.
 
+    [Version : 1.0.1]	[Date : 2016-11-13]     [Author : CV]
+	. Added the Clear() method
+	. Specifying a null value to the Set() method will unset the specified setting.
+
  **************************************************************************************************************/
 
 require_once ( 'Path.phpclass' ) ;
@@ -329,7 +333,7 @@ class  PhpSettings	// extends  Object
 	                Setting name to be modified or created.
 
 		$value (string) -
-			New setting value.
+			New setting value. If the specified value is null, the setting will be commented out.
 
 		$section (string) -
 			When specified AND the setting does not exist, it will be appended to the specified .INI section ;
@@ -353,6 +357,47 @@ class  PhpSettings	// extends  Object
 
 	public function  Set ( $setting, $value, $section = false )
 	   {
+		if  ( $value  !==  null )
+		   {
+			$this -> __ensure_loaded ( ) ;
+
+			$lower_setting	=  strtolower ( $setting ) ;
+
+			if  ( isset ( $this -> Settings [ $lower_setting ] ) )
+			   {
+				$index		=  $this -> __elect_setting ( $setting ) ;
+			
+				$this -> __assign_setting ( $index, $section, $setting, $value ) ;
+			    }
+			else
+				$this -> __create_setting ( $section, $setting, $value ) ;
+		    }
+		else
+			$this -> Unset ( $setting ) ;
+	    }
+
+
+	/*--------------------------------------------------------------------------------------------------------------
+	
+	    NAME
+	        Clear - Undefines a setting.
+	
+	    PROTOTYPE
+	        $settings -> Clear ( $setting ) ;
+	
+	    DESCRIPTION
+	        Undefines the specified setting. 
+		If the setting already exists in the INI file, it will simply be commented out.
+		If it is defined multiple times (which should never happen), only the last non-commented occurrence will
+		be commented out.
+	
+	    PARAMETERS
+	        $setting (string) -
+	                Setting to be undefined.
+	
+	 *-------------------------------------------------------------------------------------------------------------*/
+	public function  Clear ( $setting )
+	   {
 		$this -> __ensure_loaded ( ) ;
 
 		$lower_setting	=  strtolower ( $setting ) ;
@@ -360,11 +405,9 @@ class  PhpSettings	// extends  Object
 		if  ( isset ( $this -> Settings [ $lower_setting ] ) )
 		   {
 			$index		=  $this -> __elect_setting ( $setting ) ;
-			
-			$this -> __assign_setting ( $index, $section, $setting, $value ) ;
+
+			$this -> Elements [ $index ] [ 'commented' ]	=  true ;
 		    }
-		else
-			$this -> __create_setting ( $section, $setting, $value ) ;
 	    }
 
 
