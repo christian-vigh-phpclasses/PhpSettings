@@ -216,10 +216,22 @@ When a new setting is created, the information loaded from the **PhpSettings.csv
 The parameters are the following :
 
 - **$setting** (*string*) : Setting name to be modified or created.
-- **$value** (*string*) : New setting value.
+- **$value** (*string*) : New setting value. Specifying a *null* value will unset the specified setting.
 - **$section** (*string*) : When specified AND the setting does not exist, it will be appended to the specified .INI section ; otherwise, it will be appended to the end of the file.
 
 You do not need to care about quoting the value you specified : this will automatically be done if the string contains characters that needs to be quoted in a *php.ini* file.
+
+### Unset ###
+
+	$settings -> $setting 		=  null ;
+	$settings -> Unset ( $setting ) ;
+
+Undefines the specified setting.
+ 
+If the setting already exists in the INI file, it will simply be commented out.
+
+If it is defined multiple times (which should never happen), only the last non-commented occurrence will be commented out.
+
 
 ## Properties ##
 
